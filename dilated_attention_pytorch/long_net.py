@@ -152,7 +152,8 @@ class LongNetLM(nn.Module):
         x = self.long_net(x, is_causal=is_causal)
         x = self.norm(x)
         return self.out(x)
-    
+
+
 # @Author: Junchi Ma
 # @Description: The modified longnet framework to handle time series data
 class LongNetTS(nn.Module):
@@ -176,7 +177,7 @@ class LongNetTS(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
-        
+
         self.pred_len = pred_len
 
         # The 'gamma_init' parameters are different for the encoder and decoder,
@@ -188,7 +189,9 @@ class LongNetTS(nn.Module):
         decoder_gamma_init = log(3 * num_decoder_layers) ** 0.5
 
         # Input projection to project num_features to d_model
-        self.input_projection = nn.Linear(num_features, d_model, device=device, dtype=dtype)
+        self.input_projection = nn.Linear(
+            num_features, d_model, device=device, dtype=dtype
+        )
 
         # Transformer encoder
         self.encoder = nn.TransformerEncoder(
@@ -229,7 +232,9 @@ class LongNetTS(nn.Module):
         )
 
         # Output projection to project d_model to num_features (for regression task Multiple features predict Single target)
-        self.output_projection = nn.Linear(d_model, num_features, device=device, dtype=dtype)
+        self.output_projection = nn.Linear(
+            d_model, num_features, device=device, dtype=dtype
+        )
 
     def forward(self, x: Tensor, is_causal: bool = True) -> Tensor:
         """
@@ -258,7 +263,9 @@ class LongNetTS(nn.Module):
             tgt = self.decoder.norm(tgt)
 
         # Output projection to get the final output
-        output = self.output_projection(tgt[:, -self.pred_len, :])  # Take the last time step's output
+        output = self.output_projection(
+            tgt[:, -self.pred_len, :]
+        )  # Take the last time step's output
 
         return output
 
@@ -277,5 +284,3 @@ if __name__ == "__main__":
     print(out.shape)
     breakpoint()
     pass
-
-
