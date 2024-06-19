@@ -5,7 +5,7 @@ from dilated_attention_pytorch.long_net import LongNetTS
 # @Description: the longnet for time series example
 
 # Example usage
-device = torch.device("cuda")
+device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
 dtype = torch.float16
 
 # Initialize the model

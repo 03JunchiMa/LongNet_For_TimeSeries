@@ -114,8 +114,8 @@ class Exp_LongNet(object):
                 # move data to device
                 # batch_x.shape: torch.Size([32, 96, 7])
                 # batch_y.shape: torch.Size([32, 144, 7])
-                batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float().to(self.device)
+                batch_x = batch_x.half().to(self.device)
+                batch_y = batch_y.half().to(self.device)
 
                 print("Forward Pass")
                 # Forward pass
@@ -190,8 +190,8 @@ class Exp_LongNet(object):
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
                 vali_loader
             ):
-                batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float()
+                batch_x = batch_x.half().to(self.device)
+                batch_y = batch_y.half()
 
                 # Forward pass
                 if self.args.use_amp:
@@ -233,8 +233,8 @@ class Exp_LongNet(object):
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
                 test_loader
             ):
-                batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float().to(self.device)
+                batch_x = batch_x.half().to(self.device)
+                batch_y = batch_y.half().to(self.device)
 
                 # Forward pass
                 if self.args.use_amp:
@@ -318,8 +318,8 @@ class Exp_LongNet(object):
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
                 pred_loader
             ):
-                batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float().to(self.device)
+                batch_x = batch_x.half().to(self.device)
+                batch_y = batch_y.half().to(self.device)
 
                 # Forward pass
                 if self.args.use_amp:
