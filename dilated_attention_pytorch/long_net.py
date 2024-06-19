@@ -1,0 +1,281 @@
+from math import log
+from typing import Callable, Optional, Sequence, Union
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor, nn
+from torchscale.component.xpos_relative_position import XPOS
+
+from dilated_attention_pytorch.transformer import (
+    DilatedTransformerDecoderLayer,
+    DilatedTransformerEncoderLayer,
+)
+
+
+class LongNet(nn.Module):
+    """These are the *base* LongNet hyperparameters taken from the paper.  See:
+    https://arxiv.org/pdf/2307.02486.pdf, Section 4.1 & Appendix A
+    """
+
+    def __init__(
+        self,
+        d_model: int = 768,
+        nhead: int = 12,
+        num_encoder_layers: int = 12,
+        num_decoder_layers: int = 12,
+        dim_feedforward: int = 3072,
+        segment_lengths: Sequence[int] = [2048, 4096, 8192, 16384, 32768],
+        dilation_rates: Sequence[int] = [1, 2, 4, 6, 12],
+        dropout: float = 0.0,
+        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        layer_norm_eps: float = 1e-5,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ):
+        super().__init__()
+        # The 'gamma_init' parameters are different for the encoder and decoder,
+        # and depend on the number of encoder/decoder layers.  See MAGNETO paper:
+        # https://arxiv.org/pdf/2210.06423.pdf, Figure 2
+        encoder_gamma_init = (
+            log(3 * num_decoder_layers) * log(2 * num_encoder_layers) / 3
+        ) ** 0.5
+        decoder_gamma_init = log(3 * num_decoder_layers) ** 0.5
+
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer=DilatedTransformerEncoderLayer(
+                d_model=d_model,
+                nhead=nhead,
+                segment_lengths=segment_lengths,
+                dilation_rates=dilation_rates,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation=activation,
+                layer_norm_eps=layer_norm_eps,
+                gamma_init=encoder_gamma_init,
+                device=device,
+                dtype=dtype,
+            ),
+            num_layers=num_encoder_layers,
+            mask_check=False,
+            enable_nested_tensor=False,
+        )
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer=DilatedTransformerDecoderLayer(
+                d_model=d_model,
+                nhead=nhead,
+                segment_lengths=segment_lengths,
+                dilation_rates=dilation_rates,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation=activation,
+                layer_norm_eps=layer_norm_eps,
+                gamma_init=decoder_gamma_init,
+                device=device,
+                dtype=dtype,
+            ),
+            num_layers=num_decoder_layers,
+        )
+
+    def forward(self, x: Tensor, is_causal: bool = True) -> Tensor:
+        """
+        Input shape: (batch_size, seq_len, d_model)
+        Output shape: (batch_size, seq_len, d_model)
+
+        NOTE: Assume that 'is_causal' applies to both the encoder and decoder.
+        We're primarily interested in causal attention for language modeling, which is
+        what was discussed in the LongNet paper.  But in principle, leave the option
+        open for other applications.
+        """
+        tgt = x
+        for layer in self.encoder.layers:
+            x = layer(x, is_causal=is_causal)
+        if self.encoder.norm is not None:
+            x = self.encoder.norm(x)
+
+        mem = x
+        for layer in self.decoder.layers:
+            tgt = layer(tgt, mem, memory_is_causal=is_causal, tgt_is_causal=is_causal)
+        if self.decoder.norm is not None:
+            tgt = self.decoder.norm(tgt)
+
+        return tgt
+
+
+class LongNetLM(nn.Module):
+    def __init__(
+        self,
+        num_tokens: int,
+        d_model: int = 768,
+        nhead: int = 12,
+        num_encoder_layers: int = 12,
+        num_decoder_layers: int = 12,
+        dim_feedforward: int = 3072,
+        segment_lengths: Sequence[int] = [2048, 4096, 8192, 16384, 32768],
+        dilation_rates: Sequence[int] = [1, 2, 4, 6, 12],
+        dropout: float = 0.0,
+        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        layer_norm_eps: float = 1e-5,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ):
+        super().__init__()
+        self.token_embedding = nn.Embedding(
+            num_tokens, d_model, device=device, dtype=dtype
+        )
+        self.pos_embedding = XPOS(d_model).to(device=device, dtype=dtype)
+        self.long_net = LongNet(
+            d_model=d_model,
+            nhead=nhead,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+            dim_feedforward=dim_feedforward,
+            segment_lengths=segment_lengths,
+            dilation_rates=dilation_rates,
+            dropout=dropout,
+            activation=activation,
+            layer_norm_eps=layer_norm_eps,
+            device=device,
+            dtype=dtype,
+        )
+        self.norm = nn.LayerNorm(
+            d_model, eps=layer_norm_eps, device=device, dtype=dtype
+        )
+        self.out = nn.Linear(d_model, num_tokens, device=device, dtype=dtype)
+
+    def _reset_parameters(self):
+        nn.init.kaiming_normal_(self.out.weight)
+        nn.init.constant_(self.out.bias, 0)
+
+    def forward(self, x: Tensor, is_causal: bool = True) -> Tensor:
+        x = self.token_embedding(x)
+        x = x + self.pos_embedding(x)
+        x = self.long_net(x, is_causal=is_causal)
+        x = self.norm(x)
+        return self.out(x)
+    
+# @Author: Junchi Ma
+# @Description: The modified longnet framework to handle time series data
+class LongNetTS(nn.Module):
+    """Adapted LongNet for Time Series Data"""
+
+    def __init__(
+        self,
+        num_features: int,
+        d_model: int = 768,
+        nhead: int = 12,
+        num_encoder_layers: int = 12,
+        num_decoder_layers: int = 12,
+        dim_feedforward: int = 3072,
+        segment_lengths: Sequence[int] = [2048, 4096, 8192, 16384, 32768],
+        dilation_rates: Sequence[int] = [1, 2, 4, 6, 12],
+        dropout: float = 0.0,
+        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        layer_norm_eps: float = 1e-5,
+        pred_len: int = 1,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ):
+        super().__init__()
+        
+        self.pred_len = pred_len
+
+        # The 'gamma_init' parameters are different for the encoder and decoder,
+        # and depend on the number of encoder/decoder layers. See MAGNETO paper:
+        # https://arxiv.org/pdf/2210.06423.pdf, Figure 2
+        encoder_gamma_init = (
+            log(3 * num_decoder_layers) * log(2 * num_encoder_layers) / 3
+        ) ** 0.5
+        decoder_gamma_init = log(3 * num_decoder_layers) ** 0.5
+
+        # Input projection to project num_features to d_model
+        self.input_projection = nn.Linear(num_features, d_model, device=device, dtype=dtype)
+
+        # Transformer encoder
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer=DilatedTransformerEncoderLayer(
+                d_model=d_model,
+                nhead=nhead,
+                segment_lengths=segment_lengths,
+                dilation_rates=dilation_rates,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation=activation,
+                layer_norm_eps=layer_norm_eps,
+                gamma_init=encoder_gamma_init,
+                device=device,
+                dtype=dtype,
+            ),
+            num_layers=num_encoder_layers,
+            norm=nn.LayerNorm(d_model, eps=layer_norm_eps, device=device, dtype=dtype),
+        )
+
+        # Transformer decoder
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer=DilatedTransformerDecoderLayer(
+                d_model=d_model,
+                nhead=nhead,
+                segment_lengths=segment_lengths,
+                dilation_rates=dilation_rates,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation=activation,
+                layer_norm_eps=layer_norm_eps,
+                gamma_init=decoder_gamma_init,
+                device=device,
+                dtype=dtype,
+            ),
+            num_layers=num_decoder_layers,
+            norm=nn.LayerNorm(d_model, eps=layer_norm_eps, device=device, dtype=dtype),
+        )
+
+        # Output projection to project d_model to num_features (for regression task Multiple features predict Single target)
+        self.output_projection = nn.Linear(d_model, num_features, device=device, dtype=dtype)
+
+    def forward(self, x: Tensor, is_causal: bool = True) -> Tensor:
+        """
+        Input shape: (batch_size, seq_len, num_features)
+        Output shape: (batch_size, 1)
+
+        NOTE: Assume that 'is_causal' applies to both the encoder and decoder.
+        We're primarily interested in causal attention for language modeling, which is
+        what was discussed in the LongNet paper. But in principle, leave the option
+        open for other applications.
+        """
+        # Project input features to d_model
+        x = self.input_projection(x)
+
+        # Encoder
+        for layer in self.encoder.layers:
+            x = layer(x, is_causal=is_causal)
+        if self.encoder.norm is not None:
+            x = self.encoder.norm(x)
+
+        # Decoder
+        tgt = x
+        for layer in self.decoder.layers:
+            tgt = layer(tgt, x, memory_is_causal=is_causal, tgt_is_causal=is_causal)
+        if self.decoder.norm is not None:
+            tgt = self.decoder.norm(tgt)
+
+        # Output projection to get the final output
+        output = self.output_projection(tgt[:, -self.pred_len, :])  # Take the last time step's output
+
+        return output
+
+
+if __name__ == "__main__":
+    num_tokens = 1024
+    device = torch.device("cuda")
+    dtype = torch.float16
+
+    x = torch.randint(0, num_tokens - 1, size=(2, 32768), device=device)
+    model = LongNetLM(num_tokens=num_tokens, device=device, dtype=dtype)
+
+    with torch.no_grad():
+        out = model(x)
+
+    print(out.shape)
+    breakpoint()
+    pass
+
+
