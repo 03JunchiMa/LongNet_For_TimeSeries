@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 from torchscale.component.xpos_relative_position import XPOS
+from utils.Embed import * 
 
 from dilated_attention_pytorch.transformer import (
     DilatedTransformerDecoderLayer,
@@ -172,7 +173,7 @@ class LongNetTS(nn.Module):
         dropout: float = 0.0,
         activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
         layer_norm_eps: float = 1e-5,
-        pred_len: int = 1,
+        pred_len: int = 96,
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ):
@@ -180,18 +181,13 @@ class LongNetTS(nn.Module):
 
         self.pred_len = pred_len
 
-        # The 'gamma_init' parameters are different for the encoder and decoder,
-        # and depend on the number of encoder/decoder layers. See MAGNETO paper:
-        # https://arxiv.org/pdf/2210.06423.pdf, Figure 2
         encoder_gamma_init = (
             log(3 * num_decoder_layers) * log(2 * num_encoder_layers) / 3
         ) ** 0.5
         decoder_gamma_init = log(3 * num_decoder_layers) ** 0.5
 
-        # Input projection to project num_features to d_model
-        self.input_projection = nn.Linear(
-            num_features, d_model, device=device, dtype=dtype
-        )
+        # Use DataEmbedding for input embedding projection
+        self.input_embedding_projection = DataEmbedding(num_features, d_model, dropout=dropout)
 
         # Transformer encoder
         self.encoder = nn.TransformerEncoder(
@@ -236,18 +232,16 @@ class LongNetTS(nn.Module):
             d_model, num_features, device=device, dtype=dtype
         )
 
-    def forward(self, x: Tensor, is_causal: bool = True) -> Tensor:
+    def forward(self, x: Tensor, dec_inp: Tensor, x_mark: Optional[Tensor] = None, y_mark: Optional[Tensor] = None, is_causal: bool = True) -> Tensor:
         """
         Input shape: (batch_size, seq_len, num_features)
-        Output shape: (batch_size, 1)
+        Output shape: (batch_size, pred_len, num_features)
 
-        NOTE: Assume that 'is_causal' applies to both the encoder and decoder.
-        We're primarily interested in causal attention for language modeling, which is
-        what was discussed in the LongNet paper. But in principle, leave the option
-        open for other applications.
+        #NOTE: Assume that 'is_causal' applies to both the encoder and decoder.
         """
-        # Project input features to d_model
-        x = self.input_projection(x)
+        # Project input features to d_model using DataEmbedding
+        x = self.input_embedding_projection(x)
+        dec_inp = self.input_embedding_projection(dec_inp)
 
         # Encoder
         for layer in self.encoder.layers:
@@ -256,18 +250,17 @@ class LongNetTS(nn.Module):
             x = self.encoder.norm(x)
 
         # Decoder
-        tgt = x
-        for layer in self.decoder.layers:
-            tgt = layer(tgt, x, memory_is_causal=is_causal, tgt_is_causal=is_causal)
+        for idx, layer in enumerate(self.decoder.layers):
+            dec_inp = layer(dec_inp, x, memory_is_causal=is_causal, tgt_is_causal=is_causal)
+        
         if self.decoder.norm is not None:
-            tgt = self.decoder.norm(tgt)
+            dec_inp = self.decoder.norm(dec_inp)
 
         # Output projection to get the final output
-        output = self.output_projection(
-            tgt[:, -self.pred_len, :]
-        )  # Take the last time step's output
+        output = self.output_projection(dec_inp)  # Project back to num_features
+        
+        return output[:, -self.pred_len:, :]
 
-        return output
 
 
 if __name__ == "__main__":

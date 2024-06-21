@@ -14,37 +14,39 @@ class Exp_LongNet(object):
     def __init__(self, args):
         self.args = args
 
-        self.dtype = torch.float16
+        self.dtype = torch.float32
         self.device = self._acquire_device()
         self.model = self._build_model().to(self.device)
+        # self.model.apply(self.weights_init)
+
+    # def weights_init(self, m):
+    #     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+    #         nn.init.kaiming_normal_(m.weight)
+    #         if m.bias is not None:
+    #             nn.init.constant_(m.bias, 0)
 
     def _build_model(self):
         # the longnet for the time series data config
         model = LongNetTS(
             num_features=7,  # Number of features in the time series data
-            d_model=128,  # the dimension for the model (embedding dimension)
-            nhead=8,  # number of attention heads
-            num_encoder_layers=6,
-            num_decoder_layers=6,
+            d_model=256,
+            nhead=8,
+            num_encoder_layers=5,
+            num_decoder_layers=5,
             dim_feedforward=512,
-            segment_lengths=[
-                96,
-                192,
-                384,
-                768,
-                1536,
-            ],  # Example segment lengths adjusted for the input sequence length
-            dilation_rates=[1, 2, 4, 6, 12],  # Example dilation rates
-            dropout=0.1,
+            segment_lengths=[31, 62, 124],  # Example segment lengths
+            dilation_rates=[1, 2, 4],  # Example dilation rates
+            dropout=0.15,
             activation="relu",
             layer_norm_eps=1e-5,
-            pred_len=self.args.pred_len,  # Prediction length
+            pred_len=248,  # Number of prediction length(steps)
             device=self.device,
             dtype=self.dtype,
         )
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
         return model
+
 
     # get device (cpu/gpu)
     def _acquire_device(self):
@@ -92,7 +94,7 @@ class Exp_LongNet(object):
         train_steps = len(train_loader)
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
         model_optim = self._select_optimizer()
-        loss = self._select_loss()
+        criterion = self._select_loss()
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -105,33 +107,67 @@ class Exp_LongNet(object):
             # set model to be training mode
             self.model.train()
             epoch_time = time.time()
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
-                train_loader
-            ):
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
 
+                # print(f'The current i is: {i}')
                 # move data to device
-                # batch_x.shape: torch.Size([32, 96, 7])
-                # batch_y.shape: torch.Size([32, 144, 7])
-                batch_x = batch_x.half().to(self.device)
-                batch_y = batch_y.half().to(self.device)
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)
 
-                print("Forward Pass")
+                # Debugging: Check for NaNs in input data
+                if torch.isnan(batch_x).any() or torch.isnan(batch_y).any():
+                    print('NaNs found in input data')
+                    continue
+
+                # # Prepare decoder input
+                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+
+                # print(f'The dec_inp is: {dec_inp}')
+                
                 # Forward pass
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x)
+                        outputs = self.model(batch_x, dec_inp[:, -self.args.seq_len:, :], is_causal=True)
                 else:
-                    outputs = self.model(batch_x)
+                    outputs = self.model(batch_x, dec_inp[:, -self.args.seq_len:, :], is_causal=True)
+
+                # Debugging: Check for NaNs in model outputs
+                if torch.isnan(outputs).any():
+                    print('NaNs found in model outputs')
+                    continue
 
                 # select the last feature if we are using multiple features to predict the single feature
                 f_dim = -1 if self.args.features == "MS" else 0
+                outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+
+                loss_val = criterion(outputs, batch_y)
+
+                # Debugging: Check for NaNs in loss calculation
+                if torch.isnan(loss_val).any():
+                    print('NaNs found in loss calculation')
+                    continue
+
+                train_loss.append(loss_val.item())
+
+                # Backward pass
+                if self.args.use_amp:
+                    scaler.scale(loss_val).backward()
+                    scaler.step(model_optim)
+                    scaler.update()
+                else:
+                    loss_val.backward()
+                    # Apply gradient clipping
+                    # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    model_optim.step()
 
                 if (i + 1) % 100 == 0:
                     print(
                         "\titers: {0}, epoch: {1} | loss: {2:.7f}".format(
-                            i + 1, epoch + 1, loss.item()
+                            i + 1, epoch + 1, loss_val.item()
                         )
                     )
                     speed = (time.time() - time_now) / iter_count
@@ -146,24 +182,10 @@ class Exp_LongNet(object):
                     iter_count = 0
                     time_now = time.time()
 
-                outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len :, f_dim:].to(self.device)
-                loss_val = loss(outputs, batch_y)
-                train_loss.append(loss_val.item())
-
-                # Backward pass
-                if self.args.use_amp:
-                    scaler.scale(loss).backward()
-                    scaler.step(model_optim)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    model_optim.step()
-
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
-            vali_loss = self.vali(vali_data, vali_loader, loss)
-            test_loss = self.vali(test_data, test_loader, loss)
+            vali_loss = self.vali(vali_data, vali_loader, criterion)
+            test_loss = self.vali(test_data, test_loader, criterion)
 
             print(
                 "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
@@ -177,10 +199,11 @@ class Exp_LongNet(object):
 
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
-        best_model_path = path + "/" + "checkpoint.pth"
+        best_model_path = os.path.join(path, "checkpoint.pth")
         self.model.load_state_dict(torch.load(best_model_path))
 
         return self.model
+
 
     # In training vali function for monitoring the training
     def vali(self, vali_data, vali_loader, loss):
@@ -190,15 +213,19 @@ class Exp_LongNet(object):
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
                 vali_loader
             ):
-                batch_x = batch_x.half().to(self.device)
-                batch_y = batch_y.half()
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float()
+
+                # Prepare decoder input
+                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
 
                 # Forward pass
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x)
+                        outputs = self.model(batch_x, dec_inp[:, -self.args.seq_len:, :])
                 else:
-                    outputs = self.model(batch_x)
+                    outputs = self.model(batch_x, dec_inp[:, -self.args.seq_len:, :])
 
                 # Select the last pred_len steps
                 f_dim = -1 if self.args.features == "MS" else 0
@@ -233,15 +260,19 @@ class Exp_LongNet(object):
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
                 test_loader
             ):
-                batch_x = batch_x.half().to(self.device)
-                batch_y = batch_y.half().to(self.device)
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)
+
+                # Prepare decoder input
+                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
 
                 # Forward pass
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x)
+                        outputs = self.model(batch_x, dec_inp[:, -self.args.seq_len:, :])
                 else:
-                    outputs = self.model(batch_x)
+                    outputs = self.model(batch_x, dec_inp[:, -self.args.seq_len:, :])
 
                 # Select the last pred_len steps
                 f_dim = -1 if self.args.features == "MS" else 0
@@ -251,27 +282,12 @@ class Exp_LongNet(object):
                 outputs = outputs.detach().cpu().numpy()
                 batch_y = batch_y.detach().cpu().numpy()
 
-                # Optionally apply inverse transform
-                if test_data.scale and self.args.inverse:
-                    shape = outputs.shape
-                    outputs = test_data.inverse_transform(outputs.squeeze(0)).reshape(
-                        shape
-                    )
-                    batch_y = test_data.inverse_transform(batch_y.squeeze(0)).reshape(
-                        shape
-                    )
-
                 preds.append(outputs)
                 trues.append(batch_y)
 
                 # Optionally visualize results
                 if i % 20 == 0:
                     input = batch_x.detach().cpu().numpy()
-                    if test_data.scale and self.args.inverse:
-                        shape = input.shape
-                        input = test_data.inverse_transform(input.squeeze(0)).reshape(
-                            shape
-                        )
                     gt = np.concatenate((input[0, :, -1], batch_y[0, :, -1]), axis=0)
                     pd = np.concatenate((input[0, :, -1], outputs[0, :, -1]), axis=0)
                     visual(gt, pd, os.path.join(folder_path, str(i) + ".pdf"))
@@ -318,26 +334,25 @@ class Exp_LongNet(object):
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
                 pred_loader
             ):
-                batch_x = batch_x.half().to(self.device)
-                batch_y = batch_y.half().to(self.device)
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)
+
+                # decoder input
+                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
 
                 # Forward pass
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x)
+                        outputs = self.model(batch_x, dec_inp[:, -self.seq_len:, :])
                 else:
-                    outputs = self.model(batch_x)
+                    outputs = self.model(batch_x, dec_inp[:, -self.seq_len:, :])
 
                 # Select the last pred_len steps
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
 
                 outputs = outputs.detach().cpu().numpy()
-                if pred_data.scale and self.args.inverse:
-                    shape = outputs.shape
-                    outputs = pred_data.inverse_transform(outputs.squeeze(0)).reshape(
-                        shape
-                    )
                 preds.append(outputs)
 
         preds = np.array(preds)

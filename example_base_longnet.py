@@ -2,7 +2,7 @@ import torch
 from dilated_attention_pytorch.long_net import LongNetLM, LongNet
 
 device = torch.device("cuda")
-dtype = torch.float16
+dtype = torch.float32
 
 # NOTE: Showing all default values, which are described in the paper.
 net = LongNet(
@@ -24,4 +24,5 @@ x = torch.randn(1, 32768, 768, device=device, dtype=dtype)
 with torch.no_grad():
     y = net.forward(x, is_causal=True)  # default: is_causal=True
 print(y.shape)
+print(y)
 # torch.Size([1, 32768, 768])

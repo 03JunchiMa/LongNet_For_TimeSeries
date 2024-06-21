@@ -39,15 +39,18 @@ if __name__ == "__main__":
         default="custom",
         help="the data to be selected from data dict (refer to data provider)",
     )
+
     parser.add_argument(
         "--root_path",
         type=str,
         default="./dataset/ETT-small/",
         help="root path of the data file",
     )
+
     parser.add_argument(
-        "--data_path", type=str, default="ETTh1.csv", help="data csv file"
+        "--data_path", type=str, default="ETTm1.csv", help="data csv file"
     )
+
     parser.add_argument(
         "--features",
         type=str,
@@ -63,6 +66,7 @@ if __name__ == "__main__":
         default="h",
         help="freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h",
     )
+
     parser.add_argument(
         "--checkpoints",
         type=str,
@@ -71,17 +75,17 @@ if __name__ == "__main__":
     )
 
     # forecasting task
-    parser.add_argument("--seq_len", type=str, default=96, help="input sequence length")
-    parser.add_argument(
-        "--label_len",
+    parser.add_argument("--seq_len", type=str, default=248, help="input sequence length") # 96
+    parser.add_argument( # 48
+        "--label_len", 
         type=str,
-        default=48,
+        default=124,
         help="label sequence length (used for during training)",
     )
-    parser.add_argument(
+    parser.add_argument( # 96
         "--pred_len",
         type=str,
-        default=96,
+        default=248,
         help="prediction sequence length (used for during inference)",
     )
 
@@ -119,23 +123,24 @@ if __name__ == "__main__":
 
     # optimization
     parser.add_argument(
-        "--num_workers", type=int, default=10, help="data loader num workers"
+        "--num_workers", type=int, default=8, help="data loader num workers"
     )
     parser.add_argument("--exp_itr", type=int, default=1, help="experiments times")
     parser.add_argument(
         "--train_epochs", type=int, required=True, default=10, help="train epochs"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=32, help="batch size for input training data"
+        "--batch_size", type=int, default=128, help="batch size for input training data"
     )
-    parser.add_argument("--patience", type=int, default=3, help="early stopping rate")
+    parser.add_argument("--patience", type=int, default=2, help="early stopping rate")
     parser.add_argument(
-        "--learning_rate", type=float, default=0.0001, help="optimizer learning rate"
+        "--learning_rate", type=float, default=0.001, help="optimizer learning rate"
     )
     parser.add_argument(
         "--des", type=str, default="test", help="experiement description"
     )
     parser.add_argument("--loss", type=str, default="MSE", help="loss function")
+    parser.add_argument("--lradj", type=str, default='type1', help='adjust learning rate')
     parser.add_argument(
         "--use_amp",
         action="store_true",
