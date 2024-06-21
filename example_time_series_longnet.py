@@ -5,7 +5,7 @@ from dilated_attention_pytorch.long_net import LongNetTS
 # @Description: the longnet for time series example
 
 # Example usage
-device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.float32
 
 
@@ -34,8 +34,12 @@ input_data = torch.randn(batch_size, seq_len, num_features, device=device, dtype
 # Generate dummy decoder input data (batch_size=32, seq_len=144, num_features=7)
 # Assuming label_len is 48 for this example
 label_len = 48
-dec_inp = torch.zeros(batch_size, label_len + seq_len, num_features, device=device, dtype=dtype)
-dec_inp[:, :label_len, :] = torch.randn(batch_size, label_len, num_features, device=device, dtype=dtype)
+dec_inp = torch.zeros(
+    batch_size, label_len + seq_len, num_features, device=device, dtype=dtype
+)
+dec_inp[:, :label_len, :] = torch.randn(
+    batch_size, label_len, num_features, device=device, dtype=dtype
+)
 
 # Perform a forward pass
 with torch.no_grad():

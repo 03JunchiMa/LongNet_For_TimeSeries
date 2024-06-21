@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 from torchscale.component.xpos_relative_position import XPOS
-from utils.Embed import * 
+from utils.Embed import *
 
 from dilated_attention_pytorch.transformer import (
     DilatedTransformerDecoderLayer,
@@ -187,7 +187,9 @@ class LongNetTS(nn.Module):
         decoder_gamma_init = log(3 * num_decoder_layers) ** 0.5
 
         # Use DataEmbedding for input embedding projection
-        self.input_embedding_projection = DataEmbedding(num_features, d_model, dropout=dropout)
+        self.input_embedding_projection = DataEmbedding(
+            num_features, d_model, dropout=dropout
+        )
 
         # Transformer encoder
         self.encoder = nn.TransformerEncoder(
@@ -232,7 +234,14 @@ class LongNetTS(nn.Module):
             d_model, num_features, device=device, dtype=dtype
         )
 
-    def forward(self, x: Tensor, dec_inp: Tensor, x_mark: Optional[Tensor] = None, y_mark: Optional[Tensor] = None, is_causal: bool = True) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        dec_inp: Tensor,
+        x_mark: Optional[Tensor] = None,
+        y_mark: Optional[Tensor] = None,
+        is_causal: bool = True,
+    ) -> Tensor:
         """
         Input shape: (batch_size, seq_len, num_features)
         Output shape: (batch_size, pred_len, num_features)
@@ -251,16 +260,17 @@ class LongNetTS(nn.Module):
 
         # Decoder
         for idx, layer in enumerate(self.decoder.layers):
-            dec_inp = layer(dec_inp, x, memory_is_causal=is_causal, tgt_is_causal=is_causal)
-        
+            dec_inp = layer(
+                dec_inp, x, memory_is_causal=is_causal, tgt_is_causal=is_causal
+            )
+
         if self.decoder.norm is not None:
             dec_inp = self.decoder.norm(dec_inp)
 
         # Output projection to get the final output
         output = self.output_projection(dec_inp)  # Project back to num_features
-        
-        return output[:, -self.pred_len:, :]
 
+        return output[:, -self.pred_len :, :]
 
 
 if __name__ == "__main__":

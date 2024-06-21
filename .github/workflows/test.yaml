@@ -26,7 +26,6 @@ jobs:
       - name: Install Package
         run: |
           pip install -e .[test]
-	  pip install black==22.6.0 isort flake8 pytest mypy
 
       - name: Test
         run: |

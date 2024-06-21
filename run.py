@@ -75,14 +75,16 @@ if __name__ == "__main__":
     )
 
     # forecasting task
-    parser.add_argument("--seq_len", type=str, default=248, help="input sequence length") # 96
-    parser.add_argument( # 48
-        "--label_len", 
+    parser.add_argument(
+        "--seq_len", type=str, default=248, help="input sequence length"
+    )  # 96
+    parser.add_argument(  # 48
+        "--label_len",
         type=str,
         default=124,
         help="label sequence length (used for during training)",
     )
-    parser.add_argument( # 96
+    parser.add_argument(  # 96
         "--pred_len",
         type=str,
         default=248,
@@ -140,7 +142,9 @@ if __name__ == "__main__":
         "--des", type=str, default="test", help="experiement description"
     )
     parser.add_argument("--loss", type=str, default="MSE", help="loss function")
-    parser.add_argument("--lradj", type=str, default='type1', help='adjust learning rate')
+    parser.add_argument(
+        "--lradj", type=str, default="type1", help="adjust learning rate"
+    )
     parser.add_argument(
         "--use_amp",
         action="store_true",
