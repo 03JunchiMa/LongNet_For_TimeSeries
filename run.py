@@ -1,7 +1,8 @@
-import torch
-import numpy as np
 import argparse
+
+import torch
 import torch.multiprocessing
+
 from Experiments.exp_longnet_ts import Exp_LongNet
 
 # @Author: Junchi Ma

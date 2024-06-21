@@ -1,5 +1,6 @@
 import torch
-from dilated_attention_pytorch.long_net import LongNetLM, LongNet
+
+from dilated_attention_pytorch.long_net import LongNet
 
 device = torch.device("cuda")
 dtype = torch.float32

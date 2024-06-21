@@ -1,12 +1,15 @@
 import os
 import time
-import torch
-from torch import optim, nn
-from utils.tools import EarlyStopping, adjust_learning_rate, visual
-from utils.metrics import metric
+
 import numpy as np
+import torch
+from torch import nn, optim
+
 from data_provider.data_factory import data_provider
 from dilated_attention_pytorch.long_net import LongNetTS
+from utils.metrics import metric
+from utils.tools import EarlyStopping, adjust_learning_rate, visual
+
 
 # @Author: Junchi Ma
 # @Description: The experiement for longnet_ts, this is adapted from S-D-Mamba

@@ -1,11 +1,13 @@
 import os
+import warnings
+
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
+from torch.utils.data import Dataset
+
 from utils.timefeatures import time_features
-import warnings
 
 warnings.filterwarnings("ignore")
 
@@ -25,7 +27,7 @@ class Dataset_ETT_hour(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4
@@ -133,7 +135,7 @@ class Dataset_ETT_minute(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4
@@ -241,7 +243,7 @@ class Dataset_Custom(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4
@@ -520,7 +522,7 @@ class Dataset_Pred(Dataset):
     ):
         # size [seq_len, label_len, pred_len]
         # info
-        if size == None:
+        if size is None:
             self.seq_len = 24 * 4 * 4
             self.label_len = 24 * 4
             self.pred_len = 24 * 4

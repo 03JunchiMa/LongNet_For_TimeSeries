@@ -5,12 +5,12 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 from torchscale.component.xpos_relative_position import XPOS
-from utils.Embed import *
 
 from dilated_attention_pytorch.transformer import (
     DilatedTransformerDecoderLayer,
     DilatedTransformerEncoderLayer,
 )
+from utils.Embed import DataEmbedding
 
 
 class LongNet(nn.Module):

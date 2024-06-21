@@ -1,6 +1,7 @@
+import math
+
 import torch
 import torch.nn as nn
-import math
 
 
 class PositionalEmbedding(nn.Module):
@@ -187,7 +188,7 @@ class DataEmbedding_wo_pos(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x, x_mark):
-        if x_mark == None:
+        if x_mark is None:
             x = self.value_embedding(x)
         else:
             x = self.value_embedding(x) + self.temporal_embedding(x_mark)

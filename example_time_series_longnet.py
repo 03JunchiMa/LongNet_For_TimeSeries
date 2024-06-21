@@ -1,4 +1,5 @@
 import torch
+
 from dilated_attention_pytorch.long_net import LongNetTS
 
 # @Author: Junchi Ma

@@ -1,12 +1,13 @@
+from torch.utils.data import DataLoader
+
 from data_provider.data_loader import (
+    Dataset_Custom,
     Dataset_ETT_hour,
     Dataset_ETT_minute,
-    Dataset_Custom,
-    Dataset_Solar,
     Dataset_PEMS,
     Dataset_Pred,
+    Dataset_Solar,
 )
-from torch.utils.data import DataLoader
 
 data_dict = {
     "ETTh1": Dataset_ETT_hour,
